@@ -1,0 +1,60 @@
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+html, body {
+	height: 100%;
+}
+
+canvas {
+	image-rendering: pixelated;
+	image-rendering: crisp-edges;
+}
+
+body {
+	position: relative;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	background: black;
+	overflow: hidden;
+}
+
+main {
+	width: 50vw;
+	height: 50vh;
+	position: relative;
+	transform: scale(2);
+	// overflow: hidden;
+}
+
+.game {
+	display: flex;
+	position: absolute;
+	left: 50%;
+	top: 50%;
+}
+
+.layer {
+	position: absolute;
+	width: 100%;
+	height: 100%;
+	left: 0;
+	top: 0;
+	& > * {
+		position: absolute;
+	}
+}
+
+.piece {
+	transform: scale(0.25);
+	transform-origin: top left;
+	// backface-visibility: hidden;
+	// transform: translateZ(0) scale(1.0, 1.0);
+}
+
+.ghost {
+	opacity: 0.75;
+}

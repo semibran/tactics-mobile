@@ -1,0 +1,2 @@
+# tactics
+> minimalistic strategy game
