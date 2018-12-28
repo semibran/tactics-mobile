@@ -20,19 +20,22 @@ export function create({ state, actions }, sprites) {
 		state: {
 			time: 0,
 			cursor: {
-				position: null,
+				pos: null,
 				drag: null
 			},
-			selection: null,
 			viewport: {
 				size: [ window.innerWidth / scale, window.innerHeight / scale ],
-				position: [ 8, 8 ]
+				pos: [ 0, 0 ],
+				dest: null
 			},
+			modes: [],
 			anims: [],
 			cache: {
 				box: null,
-				elements: {},
+				layers: {},
 				ranges: [],
+				modes: [],
+				units: [],
 				cursor: {
 					cell: null,
 					unit: null
@@ -50,32 +53,35 @@ function init(view, game, actions) {
 	let sprites = view.sprites
 	let cursor = state.cursor
 	let viewport = state.viewport
+	let modes = state.modes
 	let anims = state.anims
 	let cache = state.cache
-	let elements = cache.elements
+	let layers = cache.layers
 
-	elements.game = div("game")
-	elements.map = renderMap(sprites, map)
-	elements.ui = div("ui")
+	layers.game = div("game")
+	layers.map = renderMap(sprites, map)
+	layers.ui = div("ui")
 
 	let unit = map.units[0]
 	if (unit) {
-		viewport.position[0] = -free(unit.cell[0])
-		viewport.position[1] = -free(unit.cell[1])
+		let x = -free(unit.cell[0])
+		let y = -free(unit.cell[1])
+		viewport.pos = [ x, y ]
 		updateViewport(view, game)
 	}
 
-	elements.shadows = Layer("shadows")
-	elements.squares = Layer("squares")
-	elements.boxes = Layer("boxes")
+	layers.shadows = Layer("shadows")
+	layers.squares = Layer("squares")
+	layers.boxes = Layer("boxes")
+	layers.buttons = Layer("buttons")
 
-	elements.markers = {
+	layers.markers = {
 		wrap: div("layer markers"),
 		arrow: null,
 		cursor: null
 	}
 
-	elements.pieces = {
+	layers.pieces = {
 		wrap: div("layer pieces"),
 		list: [],
 		selection: {
@@ -83,7 +89,7 @@ function init(view, game, actions) {
 		}
 	}
 
-	elements.selection = {
+	layers.selection = {
 		wrap: div("layer selection"),
 		piece: null,
 		z: 0
@@ -96,27 +102,28 @@ function init(view, game, actions) {
 		piece.className = "piece"
 		piece.style.left = x + "px"
 		piece.style.top = y - 1 + "px"
-		elements.pieces.wrap.appendChild(piece)
-		elements.pieces.list.push(piece)
+		layers.pieces.wrap.appendChild(piece)
+		layers.pieces.list.push(piece)
 
 		let shadow = extract(sprites.pieces.shadow)
 		shadow.className = "shadow"
 		shadow.style.left = x + 1 + "px"
 		shadow.style.top = y + 3 + "px"
-		elements.shadows.wrap.appendChild(shadow)
-		elements.shadows.list.push(shadow)
+		layers.shadows.wrap.appendChild(shadow)
+		layers.shadows.list.push(shadow)
 	}
 
-	elements.game.appendChild(elements.map)
-	elements.game.appendChild(elements.squares.wrap)
-	elements.game.appendChild(elements.shadows.wrap)
-	elements.game.appendChild(elements.pieces.wrap)
-	elements.game.appendChild(elements.markers.wrap)
-	elements.game.appendChild(elements.selection.wrap)
-	elements.ui.appendChild(elements.boxes.wrap)
+	layers.game.appendChild(layers.map)
+	layers.game.appendChild(layers.squares.wrap)
+	layers.game.appendChild(layers.shadows.wrap)
+	layers.game.appendChild(layers.pieces.wrap)
+	layers.game.appendChild(layers.markers.wrap)
+	layers.game.appendChild(layers.buttons.wrap)
+	layers.game.appendChild(layers.selection.wrap)
+	layers.ui.appendChild(layers.boxes.wrap)
 
-	view.element.appendChild(elements.game)
-	view.element.appendChild(elements.ui)
+	view.element.appendChild(layers.game)
+	view.element.appendChild(layers.ui)
 
 	loop()
 
@@ -126,84 +133,124 @@ function init(view, game, actions) {
 	}
 
 	view.element.addEventListener("touchstart", event => {
-		let position = cursor.position = normalize(event)
-		let cell = cursor.cell = contextualize(cursor.position).map(snap)
+		// event.preventDefault()
+		let pos = cursor.pos = normalize(event)
+		let cell = cursor.cell = contextualize(cursor.pos).map(snap)
 		let unit = Map.unitAt(map, cell)
-		if (unit) {
-			// piece dragging
-			let index = map.units.indexOf(unit)
-			let piece = elements.pieces.list[index]
-			if (!state.selection && !anims.length) {
-				// select unit
-				state.selection = {
-					unit: unit,
-					time: state.time
+		let index = map.units.indexOf(unit)
+		let piece = layers.pieces.list[index]
+		let mode = modes[0]
+		if (!mode) {
+			if (unit) {
+				let range = cache.ranges[index]
+				if (!range) {
+					range = cache.ranges[index] = Map.range(map, unit)
 				}
+				modes.push({
+					type: "move",
+					unit: unit,
+					path: [ cell ],
+					range: range,
+					time: state.time
+				})
+				let x = -free(unit.cell[0])
+				let y = -free(unit.cell[1])
+				viewport.dest = [ x, y ]
 				cursor.drag = [
-					parseInt(piece.style.left) - position[0],
-					parseInt(piece.style.top) - position[1]
+					parseInt(piece.style.left) - pos[0] + viewport.pos[0],
+					parseInt(piece.style.top) - pos[1] + viewport.pos[1]
 				]
-			} else if (unit !== state.selection.unit) {
-				// deselect, since a unit is already selected
-				state.selection = null
+			} else {
+				// begin viewport pan
+				viewport.dest = null
+				cursor.drag = [
+					viewport.pos[0] - pos[0],
+					viewport.pos[1] - pos[1]
+				]
 			}
-		} else {
-			if (state.selection) {
-				let unit = state.selection.unit
+		} else if (mode && mode.type === "move") {
+			if (unit) {
+				if (unit !== mode.unit) {
+					// deselect, since a unit is already selected
+					modes.length = 0
+					layers.pieces.wrap.appendChild(piece)
+					viewport.dest = null
+				}
+			} else {
+				let unit = mode.unit
 				let index = map.units.indexOf(unit)
 				let range = cache.ranges[index]
-				let piece = elements.pieces.list[index]
+				let piece = layers.pieces.list[index]
 				if (Cell.search(range.move, cell) === -1) {
-					state.selection = null
+					modes.shift()
 				} else {
 					cursor.drag = [
-						cell[0] * 16 - position[0],
-						cell[1] * 16 - position[1]
+						cell[0] * 16 - pos[0] + viewport.pos[0],
+						cell[1] * 16 - pos[1] + viewport.pos[1]
 					]
 				}
 			}
-			if (!state.selection) {
-				// begin viewport pan
-				cursor.drag = [
-					viewport.position[0] - position[0],
-					viewport.position[1] - position[1]
-				]
+		} else if (mode && mode.type === "act") {
+			let selection = null
+			for (let button of mode.buttons) {
+				let rect = button.el.getBoundingClientRect()
+				let r = rect.width / 2
+				let x = rect.left + r
+				let y = rect.top + r
+				let dx = Math.pow(x - cursor.pos[0] * scale, 2)
+				let dy = Math.pow(y - cursor.pos[1] * scale, 2)
+				if (dx + dy < r * r) {
+					selection = button
+					break
+				}
 			}
+			if (!selection || selection.id === "back") {
+				let unit = mode.unit
+				unit.cell = cache.src
+
+				let index = map.units.indexOf(unit)
+				let piece = layers.selection.wrap.children[0]
+				let shadow = layers.shadows.wrap.children[index]
+				let x = unit.cell[0] * 16
+				let y = unit.cell[1] * 16
+				piece.style.left = x + "px"
+				piece.style.top = y - 1 + "px"
+				shadow.style.left = x + 1 + "px"
+				shadow.style.top = y + 4 + "px"
+				viewport.dest = [ -free(unit.cell[0]), -free(unit.cell[1]) ]
+			}
+			modes.length = 0
 		}
-		// console.log("touchstart", cursor.position, cursor.cell)
 	})
 
 	view.element.addEventListener("touchmove", event => {
 		event.preventDefault()
-		cursor.position = normalize(event)
-		cursor.cell = contextualize(cursor.position).map(snap)
-		// console.log("touchmove", cursor.position, cursor.cell)
+		cursor.pos = normalize(event)
+		cursor.cell = contextualize(cursor.pos).map(snap)
 	})
 
 	view.element.addEventListener("touchend", event => {
-		cursor.position = normalize(event)
-		cursor.cell = contextualize(cursor.position).map(snap)
+		// event.preventDefault()
+		cursor.pos = normalize(event)
+		cursor.cell = contextualize(cursor.pos).map(snap)
 		cursor.drag = null
-		if (state.selection) {
-			let unit = state.selection.unit
-			let path = state.path
+		let mode = modes[0]
+		if (mode && mode.type === "move") {
+			let unit = mode.unit
+			let path = mode.path
 			if (path && path.length) {
 				let dest = path[path.length - 1]
 				let target = Map.unitAt(map, cursor.cell)
 				if (!target && Cell.equals(cursor.cell, dest)) {
 					move(unit, path)
 				}
-				if (unit !== target) {
-					state.selection = null
-				}
-			} else if (elements.selection.piece) {
-				let ghost = elements.selection.piece
-				elements.selection.piece = null
-				elements.selection.wrap.removeChild(ghost)
-				elements.shadows.wrap.removeChild(elements.shadows.list.pop())
+			} else if (layers.selection.ghost) {
+				let ghost = layers.selection.ghost
+				layers.selection.ghost = null
+				layers.selection.wrap.removeChild(ghost.el)
+				layers.shadows.wrap.removeChild(ghost.shadow)
 			}
 		}
-		// console.log("touchend", cursor.position, cursor.cell)
 	})
 
 	window.addEventListener("resize", event => {
@@ -220,26 +267,30 @@ function init(view, game, actions) {
 	function move(unit, path) {
 		let index = map.units.indexOf(unit)
 		cache.ranges.length = 0
-		state.path = null
+		cache.src = unit.cell
 		unit.cell = path[path.length - 1].slice()
-		anims.push({
-			type: "move",
+		modes.unshift({
+			type: "moving",
 			unit: unit,
 			path: path,
 			time: state.time
 		})
+		viewport.dest = [
+			-free(unit.cell[0]),
+			-free(unit.cell[1])
+		]
 	}
 
 	function normalize(event) {
-		let touch = event.changedTouches[0]
+		let touch = event.touches[0] || event.changedTouches[0]
 		return [ touch.pageX / scale, touch.pageY / scale ]
 	}
 
-	function contextualize(position) {
-		let rect = elements.game.getBoundingClientRect()
+	function contextualize(pos) {
+		let rect = layers.game.getBoundingClientRect()
 		return [
-			position[0] - rect.left / scale,
-			position[1] - rect.top / scale
+			pos[0] - rect.left / scale,
+			pos[1] - rect.top / scale
 		]
 	}
 }
@@ -250,71 +301,73 @@ export function update(view, game) {
 	let state = view.state
 	let cursor = state.cursor
 	let viewport = state.viewport
-	let cache = state.cache
+	let screens = state.screens
+	let modes = state.modes
 	let anims = state.anims
-	let elements = cache.elements
+	let cache = state.cache
+	let layers = cache.layers
 	let time = ++state.time
+	let mode = modes[0]
 
-	// respond to changes in selection
-	if (!cache.selection && state.selection
-	|| cache.selection && !state.selection
-	|| state.selection && cache.selection !== state.selection.unit
-	) {
-		if (cache.selection) {
-			// deselect old unit
-			let unit = cache.selection
-			let index = map.units.indexOf(unit)
-			let x = unit.cell[0] * 16
-			let y = unit.cell[1] * 16
+	// respond to mode transitions
+	if (cache.modes.length !== modes.length) {
+		let prev = cache.modes[0]
+		let next = modes[0]
+		cache.modes = modes.slice()
 
-			// remove ghost
-			if (elements.selection.piece) {
-				let ghost = elements.selection.piece
-				elements.selection.piece = null
-				elements.selection.z = 0
-				elements.selection.wrap.removeChild(ghost)
-				elements.shadows.wrap.removeChild(elements.shadows.list.pop())
+		if (prev && prev.type === "move") {
+			// remove movement elements: range, arrow, ghost, cursor
+			let ghost = layers.selection.ghost
+			if (ghost) {
+				layers.selection.ghost = null
+				layers.selection.wrap.removeChild(ghost.el)
+				layers.shadows.wrap.removeChild(ghost.shadow)
 			}
 
-
-			if (!anims.length) {
-				let shadow = elements.shadows.list[index]
-				shadow.style.left = x + 1 + "px"
-				shadow.style.top = y + 3 + "px"
-
-				let piece = elements.pieces.list[index]
-				piece.style.left = x + "px"
-				piece.style.top = y - 1 + "px"
-				elements.pieces.wrap.appendChild(piece)
+			for (let square of layers.squares.list) {
+				layers.squares.wrap.removeChild(square)
 			}
+			layers.squares.list.length = 0
 
-			// remove squares
-			for (let square of elements.squares.list) {
-				elements.squares.wrap.removeChild(square)
-			}
-			elements.squares.list.length = 0
-
-			let cursor = elements.markers.cursor
+			let cursor = layers.markers.cursor
 			if (cursor) {
-				elements.markers.wrap.removeChild(cursor.element)
-				elements.markers.cursor = null
+				layers.markers.wrap.removeChild(cursor.el)
+				layers.markers.cursor = null
 			}
 
-			if (!anims.length) {
-				let arrow = elements.markers.arrow
+			if (!next || next.type !== "moving") {
+				let arrow = layers.markers.arrow
 				if (arrow) {
-					elements.markers.wrap.removeChild(arrow)
-					elements.markers.arrow = null
+					layers.markers.wrap.removeChild(arrow)
+					layers.markers.arrow = null
 				}
+				cache.cursor.cell = null
+			}
+
+			let unit = prev.unit
+			let index = map.units.indexOf(unit)
+			let piece = layers.pieces.list[index]
+			let x = unit.cell[0] * 16
+			let y = unit.cell[1] * 16 - 1
+			piece.style.left = x + "px"
+			piece.style.top = y + "px"
+		}
+
+		if (prev && prev.type === "act") {
+			let index = map.units.indexOf(prev.unit)
+			let piece = layers.pieces.list[index]
+			layers.pieces.wrap.appendChild(piece)
+			cache.src = null
+			for (let button of prev.buttons) {
+				layers.buttons.wrap.removeChild(button.el)
 			}
 		}
 
-		if (state.selection) {
-			// select new unit
-			let unit = state.selection.unit
+		if (next && next.type === "move") {
+			let unit = next.unit
 			let index = map.units.indexOf(unit)
-			let piece = elements.pieces.list[index]
-			elements.selection.wrap.appendChild(piece)
+			let piece = layers.pieces.list[index]
+			layers.selection.wrap.appendChild(piece)
 
 			let range = cache.ranges[index]
 			if (!range) {
@@ -342,32 +395,32 @@ export function update(view, game) {
 			context.canvas.className = "range"
 			context.canvas.style.left = bounds.left * 16 + "px"
 			context.canvas.style.top = bounds.top * 16 + "px"
-			elements.squares.wrap.appendChild(context.canvas)
-			elements.squares.list.push(context.canvas)
-			cache.selection = unit
-		} else {
-			cache.selection = null
+			layers.squares.wrap.appendChild(context.canvas)
+			layers.squares.list.push(context.canvas)
 		}
 
-		if (cache.box) {
-			cache.box.exiting = true
+		if (next && next.type === "act") {
+			let unit = next.unit
+			let options = next.options
+			for (let i = 0; i < options.length; i++) {
+				let option = options[i]
+				let icon = null
+				if (option === "attack") icon = sprites.icons.sword
+				if (option === "wait") icon = sprites.icons.checkmark
+				if (option === "back") icon = sprites.icons.arrow
+				let sprite = sprites.ui.Button(icon)
+				sprite.style.display = "none"
+				let button = { id: option, el: sprite }
+				layers.buttons.wrap.appendChild(sprite)
+				next.buttons.push(button)
+
+				// layers.ring.wrap.appendChild()
+			}
 		}
 	}
 
-	if (state.selection) {
-		let selection = state.selection
-		let unit = selection.unit
-		let index = map.units.indexOf(unit)
-		let piece = elements.pieces.list[index]
-		let z = time - selection.time
-		if (z > 6) {
-			let p = (z - 6) % 120 / 120
-			z = Math.round(6 + Math.sin(2 * Math.PI * p) * 2)
-		}
-
-		piece.style.left = unit.cell[0] * 16 + "px"
-		piece.style.top = unit.cell[1] * 16 - z + "px"
-
+	if (mode && mode.unit) {
+		let unit = mode.unit
 		if (!cache.box) {
 			let textbox = sprites.ui.Box(unit.name.length * 8 + 12 + 16, 8 + 16)
 			let text = sprites.ui.Text(unit.name)
@@ -378,47 +431,135 @@ export function update(view, game) {
 			textbox.className = "box"
 
 			let box = {
-				position: [ -textbox.width, viewport.size[1] - textbox.height - 8 ],
+				pos: [ -textbox.width, viewport.size[1] - textbox.height - 8 ],
 				element: textbox,
 				exiting: false
 			}
 
-			elements.boxes.wrap.appendChild(box.element)
-			elements.boxes.list.push(box.element)
+			layers.boxes.wrap.appendChild(box.element)
+			layers.boxes.list.push(box.element)
 			cache.box = box
 		}
+	} else if (cache.box) {
+		cache.box.exiting = true
+	}
 
-		if (cursor.drag) {
-			if (!elements.selection.piece) {
-				let piece = elements.pieces.list[index]
-				let ghost = extract(piece)
-				ghost.className = "ghost piece"
-				ghost.style.display = "none"
-				elements.selection.piece = ghost
-				elements.selection.wrap.appendChild(ghost)
-
-				let shadow = extract(sprites.pieces.shadow)
-				shadow.className = "ghost shadow"
-				elements.shadows.list.push(shadow)
-				elements.shadows.wrap.appendChild(shadow)
+	if (mode) {
+		if (mode.type === "move") {
+			let unit = mode.unit
+			let index = map.units.indexOf(unit)
+			let piece = layers.pieces.list[index]
+			let z = time - mode.time
+			if (z > 6) {
+				let p = (z - 6) % 120 / 120
+				z = Math.round(6 + Math.sin(2 * Math.PI * p) * 2)
 			}
 
-			let x = cursor.drag[0] + cursor.position[0]
-			let y = cursor.drag[1] + cursor.position[1]
-			let ghost = elements.selection.piece
-			let shadow = elements.shadows.list[elements.shadows.list.length - 1]
-			elements.selection.z += (12 - elements.selection.z) / 4
-			if (!Cell.equals(cursor.cell, unit.cell)) {
-				let z = elements.selection.z
-				ghost.style.left = x + "px"
-				ghost.style.top = y - z + "px"
-				ghost.style.display = "block"
-				shadow.style.left = x + 1 + "px"
-				shadow.style.top = y + 4 + "px"
-				shadow.style.display = "block"
-			} else {
-				ghost.style.display = "none"
-				shadow.style.display = "none"
+			piece.style.left = unit.cell[0] * 16 + "px"
+			piece.style.top = unit.cell[1] * 16 - z + "px"
+
+
+			if (cursor.drag && mode.type === "move") {
+				if (!layers.selection.ghost) {
+					let piece = layers.pieces.list[index]
+					let ghost = extract(piece)
+					ghost.className = "ghost piece"
+					ghost.style.display = "none"
+
+					let shadow = extract(sprites.pieces.shadow)
+					shadow.className = "ghost shadow"
+
+					layers.shadows.wrap.appendChild(shadow)
+					layers.selection.wrap.appendChild(ghost)
+					layers.selection.ghost = {
+						el: ghost,
+						shadow: shadow
+					}
+				}
+
+				let x = cursor.drag[0] + cursor.pos[0] - viewport.pos[0]
+				let y = cursor.drag[1] + cursor.pos[1] - viewport.pos[1]
+				let ghost = layers.selection.ghost.el
+				let shadow = layers.selection.ghost.shadow
+				if (!Cell.equals(cursor.cell, unit.cell)) {
+					ghost.style.left = x + "px"
+					ghost.style.top = y - 12 + "px"
+					ghost.style.display = "block"
+					shadow.style.left = x + 1 + "px"
+					shadow.style.top = y + 4 + "px"
+					shadow.style.display = "block"
+				} else {
+					ghost.style.display = "none"
+					shadow.style.display = "none"
+				}
+			}
+		} else if (mode.type === "moving") {
+			let unit = mode.unit
+			let path = mode.path
+			let elapsed = time - mode.time
+			let t = elapsed / path.length / 2
+			let cell = pathlerp(path, t)
+			let x = cell[0] * 16
+			let y = cell[1] * 16
+			let index = map.units.indexOf(unit)
+
+			let piece = layers.pieces.list[index]
+			piece.style.left = x + "px"
+			piece.style.top = y - 1 + "px"
+
+			let shadow = layers.shadows.list[index]
+			shadow.style.left = x + 1 + "px"
+			shadow.style.top = y + 3 + "px"
+
+			let arrow = layers.markers.arrow
+			if (arrow) {
+				if (elapsed % 2 === 0) {
+					arrow.style.display = "none"
+				} else {
+					arrow.style.display = "block"
+				}
+			}
+
+			if (t === 1) {
+				layers.markers.wrap.removeChild(arrow)
+				layers.markers.arrow = null
+				let options = [ "wait", "back" ]
+				let neighbors = Cell.neighborhood(unit.cell, Unit.rng(unit.type))
+				let occupied = neighbors.filter(neighbor => Map.unitAt(map, neighbor))
+				let units = occupied.map(cell => Map.unitAt(map, cell))
+				let enemies = units.filter(other => other.faction !== unit.faction)
+				if (enemies.length) {
+					options.unshift("attack")
+				}
+				modes.unshift({
+					type: "act",
+					unit: unit,
+					time: time,
+					options: options,
+					buttons: []
+				})
+			}
+		} else if (mode.type === "act") {
+			let elapsed = time - mode.time
+			let p = (elapsed - 5) / 30
+			if (p < 0) p = 0
+			if (p > 1) p = 1
+			let t = -Math.pow(2, -10 * p) + 1
+			let unit = mode.unit
+			let options = mode.options
+			let step = 2 * Math.PI / options.length
+			for (let i = 0; i < options.length; i++) {
+				let option = options[i]
+				let button = layers.buttons.wrap.children[i]
+				let a = step * i + Math.PI / 2 + Math.PI * t
+				let r = 20 * t
+				let x = unit.cell[0] * 16 + Math.cos(a) * r
+				let y = unit.cell[1] * 16 + Math.sin(a) * r
+				if (t) {
+					button.style.display = "block"
+				}
+				button.style.left = x + "px"
+				button.style.top = y + "px"
 			}
 		}
 	}
@@ -426,99 +567,65 @@ export function update(view, game) {
 	if (cache.box) {
 		let box = cache.box
 		updateBox(box)
-		if (box.position[0] < -box.element.width - 16 * 15) {
-			elements.boxes.wrap.removeChild(box.element)
-			elements.boxes.list.splice(elements.boxes.list.indexOf(box.element), 1)
+		if (box.pos[0] < -box.element.width - 16 * 15) {
+			layers.boxes.wrap.removeChild(box.element)
+			layers.boxes.list.splice(layers.boxes.list.indexOf(box.element), 1)
 			cache.box = null
 		}
 	}
 
 	updateViewport(view, game)
-	updateCursor(view, game)
 
-	if (cursor.drag) {
-		let x = cursor.drag[0] + cursor.position[0]
-		let y = cursor.drag[1] + cursor.position[1]
-		if (!state.selection) {
-			// no unit selected; pan with cursor
-			viewport.position[0] = x
-			viewport.position[1] = y
-		}
+	if (mode && mode.type === "move") {
+		updateCursor(view, game)
 	}
 
-	let anim = anims[0]
-	if (anim) {
-		let elapsed = time - anim.time
-		let path = anim.path
-		let t = elapsed / path.length / 2
-		let cell = pathlerp(path, t)
-		let x = cell[0] * 16
-		let y = cell[1] * 16
-		let index = map.units.indexOf(anim.unit)
-
-		let piece = elements.pieces.list[index]
-		piece.style.left = x + "px"
-		piece.style.top = y + "px"
-
-		let shadow = elements.shadows.list[index]
-		shadow.style.left = x + 1 + "px"
-		shadow.style.top = y + 4 + "px"
-
-		let arrow = elements.markers.arrow
-		if (arrow) {
-			if (arrow.style.display === "block") {
-				arrow.style.display = "none"
-			} else {
-				arrow.style.display = "block"
-			}
-		}
-
-		if (t === 1) {
-			anims.shift()
-			elements.pieces.wrap.appendChild(piece)
-			elements.markers.wrap.removeChild(arrow)
-			elements.markers.arrow = null
-		}
+	// viewport panning
+	if (cursor.drag && !mode) {
+		let x = cursor.drag[0] + cursor.pos[0]
+		let y = cursor.drag[1] + cursor.pos[1]
+		viewport.pos[0] = x
+		viewport.pos[1] = y
 	}
 }
 
 function updateCursor(view, game) {
-	if (!view.state.selection) return
 	let state = view.state
-	let unit = state.selection.unit
+	let mode = state.modes[0]
+	let unit = mode.unit
 	let cursor = state.cursor
 	let map = game.map
 	let index = map.units.indexOf(unit)
 	let sprites = view.sprites
 	let cache = state.cache
 	let range = cache.ranges[index]
-	let elements = cache.elements
-	if (elements.markers.cursor && state.path && state.path.length) {
-		let path = state.path
+	let layers = cache.layers
+	if (layers.markers.cursor && mode.path && mode.path.length) {
+		let path = mode.path
 		let cell = path[path.length - 1]
 		let x = cell[0] * 16
 		let y = cell[1] * 16
-		let { element, position } = elements.markers.cursor
-		position[0] += (x - position[0]) / 4
-		position[1] += (y - position[1]) / 4
-		element.style.left = position[0] + "px"
-		element.style.top = position[1] + "px"
+		let { el, pos } = layers.markers.cursor
+		pos[0] += (x - pos[0]) / 4
+		pos[1] += (y - pos[1]) / 4
+		el.style.left = pos[0] + "px"
+		el.style.top = pos[1] + "px"
 	}
 	if (cache.cursor.cell && Cell.equals(cache.cursor.cell, cursor.cell)) {
 		return
 	}
 	cache.cursor.cell = cursor.cell
-	let path = state.path = tracePath(map, unit, cursor.cell, range, state.path)
+	let path = mode.path = tracePath(map, unit, cursor.cell, range, mode.path)
 	if (path.length) {
 		if (path.length > 1) {
 			let bounds = enclose(path)
 			let sprite = sprites.ui.Arrow(path)
-			let arrow = elements.markers.arrow
+			let arrow = layers.markers.arrow
 			if (!arrow) {
 				arrow = sprite
 				arrow.className = "arrow"
-				elements.markers.arrow = arrow
-				elements.markers.wrap.appendChild(arrow)
+				layers.markers.arrow = arrow
+				layers.markers.wrap.appendChild(arrow)
 			} else {
 				let context = arrow.getContext("2d")
 				arrow.width = sprite.width
@@ -528,73 +635,81 @@ function updateCursor(view, game) {
 			arrow.style.left = bounds.left * 16 + "px"
 			arrow.style.top = bounds.top * 16 + "px"
 		} else if (path.length === 1) {
-			let arrow = elements.markers.arrow
+			let arrow = layers.markers.arrow
 			if (arrow) {
-				elements.markers.arrow = null
-				elements.markers.wrap.removeChild(arrow)
+				layers.markers.arrow = null
+				layers.markers.wrap.removeChild(arrow)
 			}
 		}
 		let cell = path[path.length - 1]
 		let x = cell[0] * 16
 		let y = cell[1] * 16
-		if (!elements.markers.cursor) {
-			let element = extract(sprites.ui.cursor[0])
-			let position = [ x, y ]
-			element.className = "cursor"
-			element.style.left = x + "px"
-			element.style.top = y + "px"
-			elements.markers.wrap.appendChild(element)
-			elements.markers.cursor = { element, position }
+		if (!layers.markers.cursor) {
+			let el = extract(sprites.ui.cursor[0])
+			let pos = [ x, y ]
+			el.className = "cursor"
+			el.style.left = x + "px"
+			el.style.top = y + "px"
+			layers.markers.wrap.appendChild(el)
+			layers.markers.cursor = { el, pos }
 		}
 	} else {
 		// cursor is out of range
-		state.path = null
-		let cursor = elements.markers.cursor
+		mode.path = null
+		cache.cursor.cell = null
+		let cursor = layers.markers.cursor
 		if (cursor) {
-			elements.markers.cursor = null
-			elements.markers.wrap.removeChild(cursor.element)
+			layers.markers.cursor = null
+			layers.markers.wrap.removeChild(cursor.el)
 		}
-		let arrow = elements.markers.arrow
+		let arrow = layers.markers.arrow
 		if (arrow) {
-			elements.markers.arrow = null
-			elements.markers.wrap.removeChild(arrow)
+			layers.markers.arrow = null
+			layers.markers.wrap.removeChild(arrow)
 		}
 	}
 }
 
 function updateBox(box) {
 	if (!box.exiting) {
-		box.position[0] += (8 - box.position[0]) / 4
+		box.pos[0] += (8 - box.pos[0]) / 4
 	} else {
-		box.position[0] -= 24
+		box.pos[0] -= 24
 	}
 	let element = box.element
-	element.style.left = Math.round(box.position[0]) + "px"
-	element.style.top = Math.round(box.position[1]) + "px"
+	element.style.left = Math.round(box.pos[0]) + "px"
+	element.style.top = Math.round(box.pos[1]) + "px"
 }
 
 function updateViewport(view, game) {
 	let viewport = view.state.viewport
-	let elements = view.state.cache.elements
+	let layers = view.state.cache.layers
 	let diff = [
 		game.map.layout.size[0] * 16 - viewport.size[0],
 		game.map.layout.size[1] * 16 - viewport.size[1]
 	]
+
+	if (viewport.dest) {
+		viewport.pos[0] += (viewport.dest[0] - viewport.pos[0]) / 8
+		viewport.pos[1] += (viewport.dest[1] - viewport.pos[1]) / 8
+	}
+
 	if (diff[0] >= 0 && diff[1] >= 0) {
-		if (viewport.position[0] > -viewport.size[0] / 2) {
-			viewport.position[0] = -viewport.size[0] / 2
-		} else if (viewport.position[0] + viewport.size[0] / 2 < -diff[0]) {
-			viewport.position[0] = -diff[0] - viewport.size[0] / 2
+		let pos = viewport.dest || viewport.pos
+		if (pos[0] > -viewport.size[0] / 2) {
+			pos[0] = -viewport.size[0] / 2
+		} else if (pos[0] + viewport.size[0] / 2 < -diff[0]) {
+			pos[0] = -diff[0] - viewport.size[0] / 2
 		}
-		if (viewport.position[1] > -viewport.size[1] / 2) {
-			viewport.position[1] = -viewport.size[1] / 2
-		} else if (viewport.position[1] + viewport.size[1] / 2 < -diff[1]) {
-			viewport.position[1] = -diff[1] - viewport.size[1] / 2
+		if (pos[1] > -viewport.size[1] / 2) {
+			pos[1] = -viewport.size[1] / 2
+		} else if (pos[1] + viewport.size[1] / 2 < -diff[1]) {
+			pos[1] = -diff[1] - viewport.size[1] / 2
 		}
 	}
-	let x = viewport.position[0]
-	let y = viewport.position[1]
-	elements.game.style.transform = `translate(${x}px, ${y}px)`
+	let x = Math.round(viewport.pos[0])
+	let y = Math.round(viewport.pos[1])
+	layers.game.style.transform = `translate(${x}px, ${y}px)`
 }
 
 function renderMap(sprites, map) {
@@ -625,10 +740,10 @@ function free(col) {
 	return col * 16 + 8
 }
 
-function contextualize(element, position) {
+function contextualize(element, pos) {
 	let rect = element.getBoundingClientRect()
 	return [
-		position[0] - rect.left / scale,
-		position[1] - rect.top / scale
+		pos[0] - rect.left / scale,
+		pos[1] - rect.top / scale
 	]
 }

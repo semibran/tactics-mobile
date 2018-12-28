@@ -46,14 +46,15 @@ function renderPiece(base, icon, palette) {
 	let piece = Canvas(base.width, base.height)
 	piece.putImageData(base, 0, 0)
 
-	let tmp = Canvas(8, 8)
+	let light = Canvas(8, 8)
 	pixels.replace(icon, colors.white, palette.light)
-	tmp.putImageData(icon, 0, 0)
-	piece.drawImage(tmp.canvas, 4, 4)
+	light.putImageData(icon, 0, 0)
+	piece.drawImage(light.canvas, 4, 4)
 
+	let dark = Canvas(8, 8)
 	pixels.replace(icon, palette.light, palette.dark)
-	tmp.putImageData(icon, 0, 0)
-	piece.drawImage(tmp.canvas, 4, 3)
+	dark.putImageData(icon, 0, 0)
+	piece.drawImage(dark.canvas, 4, 3)
 
 	return scale(piece.canvas, 4)
 }
