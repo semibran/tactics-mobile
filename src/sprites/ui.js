@@ -5,6 +5,7 @@ import renderTextBox from "./textbox"
 import renderSquares from "./squares"
 import renderButton from "./button"
 import renderCursor from "./cursor"
+import renderRing from "./ring"
 
 export default function ui(sprites) {
 	let cursor = renderCursor(sprites.ui.cursor)
@@ -14,5 +15,6 @@ export default function ui(sprites) {
 	let Box = renderBox(sprites.ui.box)
 	let TextBox = renderTextBox(Text, Box)
 	let squares = renderSquares()
-	return { Text, Box, TextBox, Arrow, Button, squares, cursor }
+	let ring = renderRing(sprites.ui.ring)
+	return { Text, Box, TextBox, Arrow, Button, squares, ring, cursor }
 }

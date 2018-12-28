@@ -74,6 +74,7 @@ function init(view, game, actions) {
 	layers.squares = Layer("squares")
 	layers.boxes = Layer("boxes")
 	layers.buttons = Layer("buttons")
+	layers.ring = Layer("ring")
 
 	layers.markers = {
 		wrap: div("layer markers"),
@@ -118,6 +119,7 @@ function init(view, game, actions) {
 	layers.game.appendChild(layers.shadows.wrap)
 	layers.game.appendChild(layers.pieces.wrap)
 	layers.game.appendChild(layers.markers.wrap)
+	layers.game.appendChild(layers.ring.wrap)
 	layers.game.appendChild(layers.buttons.wrap)
 	layers.game.appendChild(layers.selection.wrap)
 	layers.ui.appendChild(layers.boxes.wrap)
@@ -126,6 +128,7 @@ function init(view, game, actions) {
 	view.element.appendChild(layers.ui)
 
 	loop()
+	// setInterval(loop, 1000 / 15)
 
 	function loop() {
 		update(view, game)
@@ -356,10 +359,11 @@ export function update(view, game) {
 			let index = map.units.indexOf(prev.unit)
 			let piece = layers.pieces.list[index]
 			layers.pieces.wrap.appendChild(piece)
-			cache.src = null
+			layers.ring.wrap.removeChild(prev.ring)
 			for (let button of prev.buttons) {
 				layers.buttons.wrap.removeChild(button.el)
 			}
+			cache.src = null
 		}
 
 		if (next && next.type === "move") {
@@ -412,9 +416,14 @@ export function update(view, game) {
 				let button = { id: option, el: sprite }
 				layers.buttons.wrap.appendChild(sprite)
 				next.buttons.push(button)
-
-				// layers.ring.wrap.appendChild()
 			}
+			let ring = Canvas(48, 48)
+			let x = unit.cell[0] * 16 - 16
+			let y = unit.cell[1] * 16 - 16
+			ring.canvas.style.left = x + "px"
+			ring.canvas.style.top = y + "px"
+			next.ring = ring.canvas
+			layers.ring.wrap.appendChild(ring.canvas)
 		}
 	}
 
@@ -449,9 +458,9 @@ export function update(view, game) {
 			let index = map.units.indexOf(unit)
 			let piece = layers.pieces.list[index]
 			let z = time - mode.time
-			if (z > 6) {
-				let p = (z - 6) % 120 / 120
-				z = Math.round(6 + Math.sin(2 * Math.PI * p) * 2)
+			if (z > 7) {
+				let p = (z - 7) % 120 / 120
+				z = Math.round(7 + Math.sin(2 * Math.PI * p) * 2)
 			}
 			piece.style.left = unit.cell[0] * 16 + "px"
 			piece.style.top = unit.cell[1] * 16 - z + "px"
@@ -561,6 +570,14 @@ export function update(view, game) {
 				}
 				button.style.left = x + "px"
 				button.style.top = y + "px"
+			}
+			let frame = Math.floor(elapsed / 3)
+			if (frame < sprites.ui.ring.length) {
+				let sprite = sprites.ui.ring[frame]
+				let ring = mode.ring
+				let context = ring.getContext("2d")
+				context.clearRect(0, 0, ring.width, ring.height)
+				context.drawImage(sprite, 0, 0)
 			}
 		}
 	}
