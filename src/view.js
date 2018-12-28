@@ -204,21 +204,20 @@ function init(view, game, actions) {
 					break
 				}
 			}
+			let unit = mode.unit
 			if (!selection || selection.id === "back") {
-				let unit = mode.unit
 				unit.cell = cache.src
-
-				let index = map.units.indexOf(unit)
-				let piece = layers.selection.wrap.children[0]
-				let shadow = layers.shadows.wrap.children[index]
-				let x = unit.cell[0] * 16
-				let y = unit.cell[1] * 16
-				piece.style.left = x + "px"
-				piece.style.top = y - 1 + "px"
-				shadow.style.left = x + 1 + "px"
-				shadow.style.top = y + 4 + "px"
-				viewport.dest = [ -free(unit.cell[0]), -free(unit.cell[1]) ]
 			}
+			let index = map.units.indexOf(unit)
+			let piece = layers.selection.wrap.children[0]
+			let shadow = layers.shadows.wrap.children[index]
+			let x = unit.cell[0] * 16
+			let y = unit.cell[1] * 16
+			piece.style.left = x + "px"
+			piece.style.top = y - 1 + "px"
+			shadow.style.left = x + 1 + "px"
+			shadow.style.top = y + 4 + "px"
+			viewport.dest = [ -free(unit.cell[0]), -free(unit.cell[1]) ]
 			modes.length = 0
 		}
 	})
@@ -445,7 +444,7 @@ export function update(view, game) {
 	}
 
 	if (mode) {
-		if (mode.type === "move") {
+		if (mode.type === "move" || mode.type === "act") {
 			let unit = mode.unit
 			let index = map.units.indexOf(unit)
 			let piece = layers.pieces.list[index]
@@ -454,14 +453,16 @@ export function update(view, game) {
 				let p = (z - 6) % 120 / 120
 				z = Math.round(6 + Math.sin(2 * Math.PI * p) * 2)
 			}
-
 			piece.style.left = unit.cell[0] * 16 + "px"
 			piece.style.top = unit.cell[1] * 16 - z + "px"
+		}
 
-
+		if (mode.type === "move") {
+			let unit = mode.unit
+			let index = map.units.indexOf(unit)
+			let piece = layers.pieces.list[index]
 			if (cursor.drag && mode.type === "move") {
 				if (!layers.selection.ghost) {
-					let piece = layers.pieces.list[index]
 					let ghost = extract(piece)
 					ghost.className = "ghost piece"
 					ghost.style.display = "none"
